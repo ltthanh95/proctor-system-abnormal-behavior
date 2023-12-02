@@ -1,142 +1,72 @@
-import numpy as np
-import cv2
-import time
-# def are_eyes_centered(shape, frame):
-#     # Get the average position of the eyes
-#     left_eye_center = np.mean([shape[i] for i in range(36, 42)], axis=0)
-#     right_eye_center = np.mean([shape[i] for i in range(42, 48)], axis=0)
-#     eyes_center = (left_eye_center + right_eye_center) / 2
-
-#     # Get the width of the face
-#     face_width = shape[16][0] - shape[0][0]  # Distance between the two sides of the face
-
-#     # Check if the eyes are approximately in the middle of the face
-#     # Allowing some margin for error
-#     margin = face_width * 0.05  # 15% of face width as margin
-#     face_center_x = frame.shape[1] / 2
-
-#     return (face_center_x - margin) <= eyes_center[0] <= (face_center_x + margin)
-
-# def get_eye_direction(shape, eye_indices):
-#     # Calculate the horizontal and vertical center of the eye
-#     eye_center = np.mean([shape[i] for i in eye_indices], axis=0)
-
-#     # Calculate the left, right, top, and bottom points of the eye
-#     left_corner = shape[eye_indices[0]]
-#     right_corner = shape[eye_indices[-1]]
-#     top_corner = min(shape[i][1] for i in eye_indices)
-#     bottom_corner = max(shape[i][1] for i in eye_indices)
-
-#     # Determine horizontal direction
-#     if eye_center[0] < left_corner[0]:
-#         horiz_direction = "Left"
-#     elif eye_center[0] > right_corner[0]:
-#         horiz_direction = "Right"
-#     else:
-#         horiz_direction = "Center"
-
-#     # Determine vertical direction
-#     if eye_center[1] < top_corner:
-#         vert_direction = "Up"
-#     elif eye_center[1] > bottom_corner:
-#         vert_direction = "Down"
-#     else:
-#         vert_direction = "Center"
-
-#     return horiz_direction, vert_direction
-
-# def analyze_eyes_direction(shape):
-#     # Indices for the left and right eyes
-#     left_eye_indices = [36, 37, 38, 39, 40, 41]
-#     right_eye_indices = [42, 43, 44, 45, 46, 47]
-
-
-
-#     left_eye_direction, left_eye_vert_direction = get_eye_direction(shape, left_eye_indices)
-#     right_eye_direction,right_eye_vert_direction = get_eye_direction(shape, right_eye_indices)
-
-#     return left_eye_direction,left_eye_vert_direction, right_eye_direction,right_eye_vert_direction
-
-
-
-
 import cv2
 import numpy as np
 
+def eye_on_mask(mask, side, shape):
 
+    points = [shape[i] for i in side]
+    points = np.array(points, dtype=np.int32)
+    mask = cv2.fillConvexPoly(mask, points, 255)
+    l = points[0][0]
+    t = (points[1][1]+points[2][1])//2
+    r = points[3][0]
+    b = (points[4][1]+points[5][1])//2
+    return mask, [l, t, r, b]
 
-def detect_gaze(eye_region):
-    # Convert to grayscale
-    # Check if eye_region is valid
-    if eye_region is None or eye_region.size == 0:
-        return "Invalid eye region"
-
-    # Check if eye_region is already grayscale
-    if len(eye_region.shape) == 2:
-        gray_eye = eye_region
+def find_eyeball_position(end_points, cx, cy):
+    """Find and return the eyeball positions, i.e. left or right or top or normal"""
+    x_ratio = (end_points[0] - cx)/(cx - end_points[2])
+    y_ratio = (cy - end_points[1])/(end_points[3] - cy)
+    if x_ratio > 3:
+        return 1
+    elif x_ratio < 0.33:
+        return 2
+    elif y_ratio < 0.33:
+        return 3
     else:
-        # Convert to grayscale
-        gray_eye = cv2.cvtColor(eye_region, cv2.COLOR_BGR2GRAY)
+        return 0
 
-    blurred_eye = cv2.GaussianBlur(gray_eye, (7, 7), 0)
-    # Use adaptive thresholding
-    thresholded_eye = cv2.adaptiveThreshold(blurred_eye, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+    
+def contouring(thresh, mid, img, end_points, right=False):
+   
+    cnts, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+    try:
+        cnt = max(cnts, key = cv2.contourArea)
+        M = cv2.moments(cnt)
+        cx = int(M['m10']/M['m00'])
+        cy = int(M['m01']/M['m00'])
+        if right:
+            cx += mid
+        cv2.circle(img, (cx, cy), 4, (0, 0, 255), 2)
+        pos = find_eyeball_position(end_points, cx, cy)
+        return pos
+    except:
+        pass
+    
+def process_thresh(thresh):
 
-    # Find contours
-    contours, _ = cv2.findContours(thresholded_eye, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    thresh = cv2.erode(thresh, None, iterations=2) 
+    thresh = cv2.dilate(thresh, None, iterations=4) 
+    thresh = cv2.medianBlur(thresh, 3) 
+    thresh = cv2.bitwise_not(thresh)
+    return thresh
 
-    if contours:
-        # Assuming the largest contour is the pupil
-        max_contour = max(contours, key=cv2.contourArea)
-        (x, y, w, h) = cv2.boundingRect(max_contour)
+def print_eye_pos(img, left, right):
 
-        # Pupil center
-        pupil_center = (x + w / 2, y + h / 2)
-
-        # Eye region center
-        eye_center = (eye_region.shape[1] / 2, eye_region.shape[0] / 2)
-
-        # Determine gaze direction
-        if pupil_center[0] < eye_center[0]:
-            horizontal = "Looking Left"
-        elif pupil_center[0] > eye_center[0]:
-            horizontal = "Looking Right"
-        else:
-            horizontal = "Looking Center"
-
-        if pupil_center[1] < eye_center[1]:
-            vertical = "Looking Up"
-        elif pupil_center[1] > eye_center[1]:
-            vertical = "Looking Down"
-        else:
-            vertical = "Looking Center"
-
-        return horizontal, vertical
-
-    return "Unable to determine gaze"
-# cap = cv2.VideoCapture(0)
-
-# while True:
-#     ret, frame = cap.read()
-#     if not ret:
-#         break
-
-#     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-#     faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-
-#     for (x, y, w, h) in faces:
-        # roi_gray = gray[y:y+h, x:x+w]
-        # eyes = eye_cascade.detectMultiScale(roi_gray)
-
-        # for (ex, ey, ew, eh) in eyes:
-        #     eye_region = roi_gray[ey:ey+eh, ex:ex+ew]
-            
-        #     gaze_direction = detect_gaze(eye_region)
-        #     print(gaze_direction,time.time())  # or use this information as needed
-
-#     cv2.imshow('Frame', frame)
-#     if cv2.waitKey(1) & 0xFF == ord('q'):
-#         break
-
-# cap.release()
-# cv2.destroyAllWindows()
+    
+    if left == right and left != 0:
+        text = ''
+        if left == 1:
+            #print('Looking left')
+            text = 'Looking left'
+        elif left == 2:
+            #print('Looking right')
+            text = 'Looking right'
+        elif left == 3:
+            #print('Looking up')
+            text = 'Looking up'
+        font = cv2.FONT_HERSHEY_SIMPLEX 
+        cv2.putText(img, text, (30, 30), font,  
+                   1, (0, 255, 255), 2, cv2.LINE_AA)
+        return text
+    
+   
