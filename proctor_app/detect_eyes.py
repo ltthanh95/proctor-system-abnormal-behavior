@@ -50,23 +50,4 @@ def process_thresh(thresh):
     thresh = cv2.bitwise_not(thresh)
     return thresh
 
-def print_eye_pos(img, left, right):
-
-    
-    if left == right and left != 0:
-        text = ''
-        if left == 1:
-            #print('Looking left')
-            text = 'Looking left'
-        elif left == 2:
-            #print('Looking right')
-            text = 'Looking right'
-        elif left == 3:
-            #print('Looking up')
-            text = 'Looking up'
-        font = cv2.FONT_HERSHEY_SIMPLEX 
-        cv2.putText(img, text, (30, 30), font,  
-                   1, (0, 255, 255), 2, cv2.LINE_AA)
-        return text
-    
    

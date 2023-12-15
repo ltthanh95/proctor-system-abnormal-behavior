@@ -5,7 +5,11 @@ import numpy as np
 import math
 from face_detector import get_face_detector, find_faces,draw_faces
 from face_landmarks import get_landmark_model, detect_marks
-from detect_eyes import eye_on_mask,find_eyeball_position,contouring,process_thresh,print_eye_pos
+from detect_eyes import eye_on_mask,contouring,process_thresh
+
+font = cv2.FONT_HERSHEY_SIMPLEX 
+cap = cv2.VideoCapture(0)
+
 
 
 
@@ -30,6 +34,34 @@ cv2.createTrackbar('threshold', 'image', 75, 255, nothing)
 
 
 ###################################
+
+
+#####################################
+"""
+    Mouth tracking
+"""
+
+outer_points = [[49, 59], [50, 58], [51, 57], [52, 56], [53, 55]]
+d_outer = [0]*5
+inner_points = [[61, 67], [62, 66], [63, 65]]
+d_inner = [0]*3
+
+# Record initial mouth distances
+for _ in range(100):
+    ret, img = cap.read()
+    rects = find_faces(img, face_model)
+    for rect in rects:
+        shape = detect_marks(img, landmark_model, rect)
+        for i, (p1, p2) in enumerate(outer_points):
+            d_outer[i] += shape[p2][1] - shape[p1][1]
+        for i, (p1, p2) in enumerate(inner_points):
+            d_inner[i] += shape[p2][1] - shape[p1][1]
+cv2.destroyAllWindows()
+d_outer = [x / 100 for x in d_outer]
+d_inner = [x / 100 for x in d_inner]
+
+
+#####################################
 
 def threshold_base_on_head_pose(head_pose):
     if head_pose=="Head right":
@@ -108,10 +140,10 @@ def head_pose_points(img, rotation_vector, translation_vector, camera_matrix):
     
 face_model = get_face_detector()
 landmark_model = get_landmark_model()
-cap = cv2.VideoCapture(0)
+#cap = cv2.VideoCapture(0)
 ret, img = cap.read()
 size = img.shape
-font = cv2.FONT_HERSHEY_SIMPLEX 
+#font = cv2.FONT_HERSHEY_SIMPLEX 
 # 3D model points.
 model_points = np.array([
                             (0.0, 0.0, 0.0),             # Nose tip
@@ -133,6 +165,7 @@ camera_matrix = np.array(
 ang1_count=0
 ang2_count=0
 eye_move=0
+mouth_move=0
 while True:
     ret, img = cap.read()
     if ret == True:
@@ -206,16 +239,16 @@ while True:
                
             
 
-            shape = detect_marks(img, landmark_model, face)
+            #shape = detect_marks(img, landmark_model, face)
             mask = np.zeros(img.shape[:2], dtype=np.uint8)
-            mask, end_points_left = eye_on_mask(mask, left, shape)
-            mask, end_points_right = eye_on_mask(mask, right, shape)
+            mask, end_points_left = eye_on_mask(mask, left, marks)
+            mask, end_points_right = eye_on_mask(mask, right, marks)
             mask = cv2.dilate(mask, kernel, 5)
             
             eyes = cv2.bitwise_and(img, img, mask=mask)
             mask = (eyes == [0, 0, 0]).all(axis=2)
             eyes[mask] = [255, 255, 255]
-            mid = int((shape[42][0] + shape[39][0]) // 2)
+            mid = int((marks[42][0] + marks[39][0]) // 2)
             eyes_gray = cv2.cvtColor(eyes, cv2.COLOR_BGR2GRAY)
             #threshold = cv2.getTrackbarPos('threshold', 'image')
             _, thresh = cv2.threshold(eyes_gray, threshold_base_on_head_pose(head_pose), 255, cv2.THRESH_BINARY)
@@ -223,33 +256,53 @@ while True:
             
             eyeball_pos_left = contouring(thresh[:, 0:mid], mid, img, end_points_left)
             eyeball_pos_right = contouring(thresh[:, mid:], mid, img, end_points_right, True)
-
-            print(eyeball_pos_left)
            
             if eyeball_pos_left == eyeball_pos_right and eyeball_pos_left != 0:
                 text = ''
                 if eyeball_pos_left == 1:
-                    print('Looking left')
                     text = 'Looking left'
                 elif eyeball_pos_left == 2:
-                    print('Looking right')
                     text = 'Looking right'
                 elif eyeball_pos_left == 3:
-                    print('Looking up')
                     text = 'Looking up'
-                font = cv2.FONT_HERSHEY_SIMPLEX 
-                cv2.putText(img, text, (30, 30), font,  
-                        1, (0, 255, 255), 2, cv2.LINE_AA)
+                #font = cv2.FONT_HERSHEY_SIMPLEX
+                print(text)
+                if text!="": 
+                    draw_faces(img,faces,(0, 0, 255))
                 
-        
-            if ang1_count>50 or ang2_count >50 or eye_move>10:
-                 
-                 cv2.imwrite(f'abnormal_behavior_detection_{converttime(time.time())}.jpg', img)
+
+
+
+            """
+                Mouth
+            """
+            cnt_outer = 0
+            cnt_inner = 0
+            #draw_marks(img, shape[48:])
+            for i, (p1, p2) in enumerate(outer_points):
+                if d_outer[i] + 2 < marks[p2][1] - marks[p1][1]:
+                    cnt_outer += 1 
+            for i, (p1, p2) in enumerate(inner_points):
+                if d_inner[i] + 1 <  marks[p2][1] - marks[p1][1]:
+                    cnt_inner += 1
+            if cnt_outer > 2 and cnt_inner > 1:
+                mouth_move+=1
+                draw_faces(img,faces,(0, 0, 255))
+            # show the output image with the face detections + facial landmarks
+            else:
+                mouth_move=0
+
+
+            print(mouth_move)
+            if ang1_count>50 or ang2_count >50 or eye_move>10 or mouth_move>4:
+                
+                #cv2.imwrite(f'abnormal_behavior_detection_{converttime(time.time())}.jpg', img)
+                print(f"Capture at {img}-{converttime(time.time())}")
 
         cv2.imshow('img', img)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
     else:
         break
-cv2.destroyAllWindows()
 cap.release()
+cv2.destroyAllWindows()
